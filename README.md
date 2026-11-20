@@ -67,7 +67,6 @@ Per-class recall (%) with D4 averaging.
 | River | 95.0 | 98.4 | 99.0 | 99.0 |
 | Sea/lake | 99.3 | 99.8 | 99.8 | 100.0 |
 
-![Per-class change from adding the 13 bands, pretrained models](results/figures/band_gain.png)
 
 ### Errors
 
