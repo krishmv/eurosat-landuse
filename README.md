@@ -26,32 +26,82 @@ Split: stratified 70 / 10 / 20 (train / validation / test), seeded and saved in 
 
 ## Results
 
-> **TODO:** paste the tables from `results/summary.md` and the figures from `results/figures/` after running the notebook.
+All numbers are test accuracy on the same 5,400 held-out tiles. "D4 averaging" means the prediction is averaged over the 8 rotations and mirror images of each tile.
 
 ### Full training set
 
-<!-- table: main results -->
+| Model | Params | Test acc. | Test acc. with D4 averaging | Train time (s) |
+|---|---:|---:|---:|---:|
+| Small CNN, scratch, RGB | 1.2M | 97.41% | 97.80% | 81 |
+| ResNet-18, scratch, RGB | 11.2M | 95.15% | 95.85% | 69 |
+| ResNet-18, ImageNet, RGB | 11.2M | 98.57% | 98.98% | 70 |
+| ResNet-18, scratch, 13 bands | 11.2M | 97.89% | 98.11% | 134 |
+| ResNet-18, ImageNet, 13 bands | 11.2M | 98.76% | 98.89% | 130 |
 
 ### Label efficiency
 
-<!-- table + results/figures/label_efficiency.png -->
+Test accuracy (%) with D4 averaging, mean ± standard deviation over 3 seeds. 1% of the labels is 191 training images.
+
+| Model | 1% labels | 5% labels | 20% labels | 100% labels |
+|---|---:|---:|---:|---:|
+| ResNet-18, scratch, RGB | 71.6 ± 0.4 | 82.7 ± 1.1 | 92.9 ± 0.7 | 95.9 |
+| ResNet-18, ImageNet, RGB | 90.5 ± 0.6 | 96.3 ± 0.2 | 98.0 ± 0.1 | 99.0 |
+| ResNet-18, ImageNet, 13 bands | 90.6 ± 0.8 | 96.4 ± 0.3 | 98.1 ± 0.2 | 98.9 |
+
+![Label efficiency](results/figures/label_efficiency.png)
 
 ### Where the extra bands help
 
-<!-- results/figures/band_gain.png -->
+Per-class recall (%) with D4 averaging.
+
+| Class | Scratch, RGB | Scratch, 13 bands | ImageNet, RGB | ImageNet, 13 bands |
+|---|---:|---:|---:|---:|
+| Annual crop | 93.3 | 98.3 | 98.2 | 98.3 |
+| Forest | 98.5 | 99.0 | 99.7 | 99.8 |
+| Herbaceous vegetation | 94.7 | 97.8 | 99.0 | 98.5 |
+| Highway | 94.6 | 96.8 | 98.4 | 98.8 |
+| Industrial | 97.8 | 98.0 | 99.0 | 99.0 |
+| Pasture | 93.5 | 95.5 | 97.2 | 97.5 |
+| Permanent crop | 91.2 | 96.8 | 98.8 | 98.0 |
+| Residential | 99.0 | 99.3 | 100.0 | 99.3 |
+| River | 95.0 | 98.4 | 99.0 | 99.0 |
+| Sea/lake | 99.3 | 99.8 | 99.8 | 100.0 |
+
+![Per-class change from adding the 13 bands, pretrained models](results/figures/band_gain.png)
 
 ### Errors
 
-<!-- results/figures/confusion_best.png, results/figures/mistakes_best.png, most-confused pairs -->
+The best model (ImageNet ResNet-18, RGB) gets 55 of the 5,400 test tiles wrong. The most frequent confusions:
+
+| Class pair | Errors (both directions) |
+|---|---:|
+| Annual crop ↔ Permanent crop | 8 |
+| Herbaceous vegetation ↔ Permanent crop | 7 |
+| Herbaceous vegetation ↔ Pasture | 7 |
+| Annual crop ↔ Pasture | 7 |
+| Highway ↔ River | 6 |
+
+![Confusion matrix](results/figures/confusion_best.png)
+
+![Misclassified test tiles](results/figures/mistakes_best.png)
 
 ## Findings
 
-> **TODO:** for each of the three questions, write 2–4 sentences on what the numbers show, including anything surprising or anything that did not work.
+**1. Pretraining matters most when labels are scarce.** I expected ImageNet weights to help less here, because photos of everyday objects look nothing like satellite tiles. They still help a lot. With only 191 labelled tiles, the pretrained ResNet-18 reaches 90.5% against 71.6% from scratch, a gap of 19 points. The gap shrinks as more labels are added (13.6 points at 5%, 5.1 at 20%, 3.1 with all labels), but it never closes. The spread across seeds is at most about 1 point, so these differences are not noise. For a project where labelling is expensive, this is the most useful result here: a pretrained model with 5% of the labels beats a from-scratch model with all of them.
+
+**2. A small network beats ResNet-18 when both start from scratch.** This surprised me. The 1.2M-parameter CNN reaches 97.8%, and the 11.2M-parameter ResNet-18 only 95.9%. My explanation is the input size: ResNet-18 was designed for 224-pixel photos, and its first layers shrink a 64-pixel tile to 2×2 before classifying it, so a lot of spatial detail is lost early. The small CNN keeps a 4×4 map until the end. Pretraining hides this weakness, since the pretrained ResNet is the best model overall. I haven't tested this explanation yet. Upsampling the tiles, or removing the first downsampling step, would test it directly.
+
+**3. The extra spectral bands help only without pretraining.** From scratch, going from RGB to all 13 bands more than halves the number of errors (224 to 102). The largest gains are on annual crop (+5.0 points), permanent crop (+5.6) and river (+3.4). This fits the physics: vegetation and water look very different in near-infrared, which RGB cannot see. With ImageNet pretraining, the 13-band model is no better than RGB at any amount of labels, and the small differences in both directions (55 vs 60 errors) are within what I would expect from a single run. Two explanations are possible. Pretrained features may already capture most of what the extra bands add. Or the new bands' input weights, which start from an average of the RGB filters, may not have adapted enough in 2,000 steps. The second can be tested by training longer, or by giving the first layer a higher learning rate.
+
+**4. Averaging over rotations and mirror images is a small free gain.** Averaging predictions over the 8 symmetries of the square improves test accuracy in all 32 runs. On the full training set it adds 0.1 to 0.7 points, and up to 3.3 points in the runs with few labels, so it helps most where the model is weakest. It needs no retraining, only 8 forward passes at test time.
+
+**5. The remaining errors are between classes that really do look alike.** Most mistakes are among the four agricultural and vegetation classes (annual crop, permanent crop, pasture, herbaceous vegetation), where a 64×64-pixel tile at 10 m per pixel often shows a mix of land types. The other common one is highway vs river: both appear as a long, thin line across the tile.
 
 ## Limitations
 
 - **Spatial leakage.** The split is random over tiles, and EuroSAT tiles cut from the same Sentinel-2 scene can be next to each other. Neighbouring tiles in train and test make the task easier than classifying a new region, so absolute accuracies are probably optimistic. Comparisons between models share the same bias. A geographic split that holds out whole regions would measure that directly.
 - **Seeds.** Full-data runs use one seed each. The label-efficiency runs use three, and their spread is shown, so differences smaller than that spread should not be read as real.
+- **Training length.** For 4 of the 5 full-data runs, the best validation accuracy came at the very last training step, so those models were still improving when training stopped. All accuracies here are probably slightly below what these models can reach, and the 13-band pretrained model may be the most affected (finding 3).
 - **Scope.** One architecture family at the native 64×64 resolution. Upsampling the tiles or using a remote-sensing-pretrained backbone could change the answers.
 
 ## Reproduce
